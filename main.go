@@ -54,7 +54,30 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 			containerName := randomString(8)
 
-			resp, err := cli.ContainerCreate(ctx, &container.Config{Image: imageName}, hostConfig, nil, nil, containerName)
+			containerEnvironment := []string{
+				"GITHUB_TOKEN=" + os.Getenv("GITHUB_TOKEN"),
+			}
+
+			enterpriseUrl := os.Getenv("RUNNER_ENTERPRISE_URL")
+			orgUrl := os.Getenv("RUNNER_ORGANIZATION_URL")
+			repoUrl := os.Getenv("RUNNER_REPOSITORY_URL")
+
+			if enterpriseUrl != "" {
+				containerEnvironment = append(containerEnvironment, "RUNNER_ENTERPRISE_URL="+enterpriseUrl)
+			}
+
+			if orgUrl != "" {
+				containerEnvironment = append(containerEnvironment, "RUNNER_ORGANIZATION_URL="+orgUrl)
+			}
+
+			if repoUrl != "" {
+				containerEnvironment = append(containerEnvironment, "RUNNER_REPOSITORY_URL="+repoUrl)
+			}
+
+			resp, err := cli.ContainerCreate(ctx, &container.Config{
+				Image: imageName,
+				Env:   containerEnvironment,
+			}, hostConfig, nil, nil, containerName)
 			logAnyErr(err)
 
 			if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
