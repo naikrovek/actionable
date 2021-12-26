@@ -14,6 +14,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build2:
     runs-on: self-hosted
     steps:
@@ -24,6 +25,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build3:
     runs-on: self-hosted
     steps:
@@ -34,6 +36,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build4:
     runs-on: self-hosted
     steps:
@@ -44,6 +47,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build5:
     runs-on: self-hosted
     steps:
@@ -54,6 +58,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build6:
     runs-on: self-hosted
     steps:
@@ -64,6 +69,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build7:
     runs-on: self-hosted
     steps:
@@ -74,6 +80,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
   build8:
     runs-on: self-hosted
     steps:
@@ -84,3 +91,4 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          echo $(hostname)
