@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,17 +15,18 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/google/go-github/v40/github"
+	"github.com/google/go-github/v41/github"
 )
 
 var (
-	ctx       context.Context
-	imageName *string
-	cli       *client.Client
-	//operatingSystem *string
+	ctx           context.Context
+	imageName     *string
+	cli           *client.Client
 	webhookSecret *string
-	statusMap     map[int64]string
+	hostnameToId  map[string]string
+	allowDind     *bool
 )
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -42,22 +45,28 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	switch e := event.(type) {
 	case *github.WorkflowJobEvent:
-		runId := e.WorkflowJob.GetRunID()
-
 		if e.Action != nil && *e.Action == "queued" {
 			fmt.Println(*e.Repo.HTMLURL, "action queued.")
-			statusMap[runId] = "queued"
 
-			// run the docker container with the correct parameters.
-			// hostConfig := &container.HostConfig{
-			// 	Mounts: []mount.Mount{
-			// 		{
-			// 			Type:   mount.TypeBind,
-			// 			Source: "/var/run/docker.sock",
-			// 			Target: "/var/run/docker.sock",
-			// 		},
-			// 	},
-			// }
+			hostConfig := &container.HostConfig{}
+
+			//NOTE | if you want to use docker in the containers you spawn, and you are aware of the
+			//NOTE | security implications, use the -allowDind parameter when launching this tool.
+			//NOTE | You will get a "docker-beside-docker" configuration where containers are
+			//NOTE | spawned  by the docker host, but will work as if they are in a
+			//NOTE | "docker-inside-docker" (dind) configuration.
+
+			if *allowDind {
+				hostConfig = &container.HostConfig{
+					Mounts: []mount.Mount{
+						{
+							Type:   mount.TypeBind,
+							Source: "/var/run/docker.sock",
+							Target: "/var/run/docker.sock",
+						},
+					},
+				}
+			}
 
 			containerName := randomString(8)
 
@@ -84,97 +93,100 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 				containerEnvironment = append(containerEnvironment, "RUNNER_REPOSITORY_URL="+repoUrl)
 			}
 
-			// linuxPlatform := v1.Platform{
-			// 	Architecture: "amd64",
-			// 	OS:           "linux",
-			// }
-
-			// windowsPlatform := v1.Platform{
-			// 	Architecture: "amd64",
-			// 	OS:           "windows",
-			// }
-
-			// containerPlatform := v1.Platform{Architecture: "amd64"}
-
-			// if *operatingSystem == "linux" {
-			// 	log.Println("Linux container selected.")
-			// 	containerPlatform = linuxPlatform
-			// } else if *operatingSystem == "windows" {
-			// 	log.Println("Windows container selected.")
-			// 	containerPlatform = windowsPlatform
-			// }
-
-			log.Println("Creating container:", *imageName, "with name:", containerName)
+			log.Println("Creating container:", containerName)
 
 			containerConfig := &container.Config{
-				Image: *imageName,
-				Env:   containerEnvironment,
+				Hostname: containerName, // not sure it's important to do this. to keep track of things, I mean.
+				Image:    *imageName,
+				Env:      containerEnvironment,
 			}
 
 			if ctx == nil {
-				log.Fatal("ctx is nil")
+				log.Fatal("no context, somehow.")
 			}
 
-			resp, err := cli.ContainerCreate(ctx, containerConfig, nil, nil, nil, containerName)
-			logAnyErr(err)
+			resp, containerCreateErr := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+			failOnErr(containerCreateErr, "couldn't create container.")
 
-			if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-				log.Println(err)
-			}
+			containerStartErr := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
+			failOnErr(containerStartErr, "couldn't start container.")
 
-			log.Println(resp.ID)
+			log.Println("started container:", resp.ID)
+			hostnameToId[containerName] = resp.ID
 
 			return
 		}
 
-		if e.Action != nil && *e.Action == "in_progress" {
-			fmt.Println(*e.Repo.HTMLURL, "action 'in_progress'.")
-			statusMap[runId] = "in_progress"
-			return
-		}
+		// if e.Action != nil && *e.Action == "in_progress" {
+		// 	fmt.Println(*e.Repo.HTMLURL, "action 'in_progress'.")
+		// 	//?: is monitoring for this status useful?
+		// 	return
+		// }
 
 		if e.Action != nil && *e.Action == "completed" {
 			fmt.Println(*e.Repo.HTMLURL, "action complete:", *e.WorkflowJob.Conclusion)
-			statusMap[runId] = "completed"
-			// runner should self-delete if it was configured with the --ephemeral parameter, but
-			// if it was cancelled before it could finish, we need to clean that up, here.
-			//TODO: that
+			removeErr := cli.ContainerRemove(ctx, hostnameToId[*e.WorkflowJob.RunnerName], types.ContainerRemoveOptions{})
+			logOnErr(removeErr, "Couldn't remove container with id: "+hostnameToId[*e.WorkflowJob.RunnerName]+" and hostname: "+*e.WorkflowJob.RunnerName)
+
 			return
 		}
 	default:
-		log.Printf("unknown event type %s\n", github.WebHookType(r))
+		log.Printf("unhandled event type %s\n", github.WebHookType(r))
+
 		return
 	}
 }
 
 func main() {
-	imageName = flag.String("image", "ghcr.io/naikrovek/actions-runner:0.6", "container name (& optional tag)")
-	//operatingSystem = flag.String("operatingSystem", "linux", "OS of actions containers; 'windows' or 'linux'.")
+	imageName = flag.String("image", "ghcr.io/naikrovek/actions-runner:0.7", "container name (& optional tag)")
 	webhookSecret = flag.String("webhookSecret", "", "secret supplied in webhook configuration")
+	allowDind = flag.Bool("allowDind", false, "allows docker to run inside spawned containers.")
 	flag.Parse()
 
-	statusMap = make(map[int64]string)
+	// maps container hostnames to container ID.  We need the ID to delete the container after it's
+	// done with its work.
+	hostnameToId = make(map[string]string)
 
+	// Docker Stuff
 	log.Println("setting context")
 	ctx = context.Background()
+
+	// the docker client object
 	log.Println("setting cli")
 	cli, _ = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 
-	log.Println("pulling image")
-	out, err := cli.ImagePull(ctx, *imageName, types.ImagePullOptions{})
-	bytesRead, err2 := io.Copy(os.Stdout, out)
-	logAnyErr(err2)
-	log.Println("read:", bytesRead, "bytes")
-	logAnyErr(err)
+	//TODO: make this stuff cmdline options or environment variables.
+	// authentication to pull images. make sure it's valid for the container registry you're using.
+	authConfig := types.AuthConfig{
+		Username: "naikrovek",
+		Password: "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",
+	}
+	authJson, encodeErr := json.Marshal(authConfig)
+	failOnErr(encodeErr, "couldn't encode AuthConfig object to JSON.")
+	authstr := base64.URLEncoding.EncodeToString(authJson)
 
+	// pull the specified image
+	log.Println("pulling image")
+	out, pullErr := cli.ImagePull(ctx, *imageName, types.ImagePullOptions{RegistryAuth: authstr})
+	failOnErr(pullErr, "couldn't pull container image.")
+	_, copyErr := io.Copy(os.Stdout, out)
+	failOnErr(copyErr, "couldn't pull container image.")
+
+	// finally, if nothing has failed, start the webserver, and listen on the /webhook path.
 	log.Println("server started")
 	http.HandleFunc("/webhook", handleWebhook)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func logAnyErr(e error) {
+func logOnErr(e error, msg string) {
 	if e != nil {
-		log.Println(e)
+		log.Println(e, msg)
+	}
+}
+
+func failOnErr(e error, msg string) {
+	if e != nil {
+		log.Fatal(e, msg)
 	}
 }
 

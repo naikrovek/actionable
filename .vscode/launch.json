@@ -12,11 +12,11 @@
             "program": "${fileDirname}",
             "env": {
                 "RUNNER_REPOSITORY_URL": "https://github.com/naikrovek/actionable",
-                "GITHUB_TOKEN": "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"
+                "GITHUB_TOKEN": "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"
             }, 
             "args": [
                 "-webhookSecret", "this is my webhook secret",
-                "-image", "ghcr.io/peter-murray/ubuntu-actions-runner:2d9d97677b0068695479aa1f8ea54a964f3fffaa"
+                "-image", "ghcr.io/naikrovek/actions-runner:0.6"
             ]
         }
     ]
