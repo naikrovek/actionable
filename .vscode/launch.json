@@ -16,7 +16,7 @@
             }, 
             "args": [
                 "-webhookSecret", "this is my webhook secret",
-                "-image", "ghcr.io/naikrovek/actions-runner:0.6"
+                "-image", "ghcr.io/naikrovek/actions-runner:0.7"
             ]
         }
     ]

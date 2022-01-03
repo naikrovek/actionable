@@ -101,10 +101,6 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 				Env:      containerEnvironment,
 			}
 
-			if ctx == nil {
-				log.Fatal("no context, somehow.")
-			}
-
 			resp, containerCreateErr := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 			failOnErr(containerCreateErr, "couldn't create container.")
 
@@ -151,16 +147,21 @@ func main() {
 	log.Println("setting context")
 	ctx = context.Background()
 
+	if ctx == nil {
+		log.Fatal("no context, somehow. exiting.")
+	}
+
 	// the docker client object
 	log.Println("setting cli")
 	cli, _ = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 
+	if cli == nil {
+		log.Fatal("could not create Docker API client. exiting.")
+	}
+
 	//TODO: make this stuff cmdline options or environment variables.
 	// authentication to pull images. make sure it's valid for the container registry you're using.
-	authConfig := types.AuthConfig{
-		Username: "naikrovek",
-		Password: "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",
-	}
+	authConfig := "{\"username\":\"naikrovek\",\"password\":\"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\"}"
 	authJson, encodeErr := json.Marshal(authConfig)
 	failOnErr(encodeErr, "couldn't encode AuthConfig object to JSON.")
 	authstr := base64.URLEncoding.EncodeToString(authJson)
@@ -169,12 +170,15 @@ func main() {
 	log.Println("pulling image")
 	out, pullErr := cli.ImagePull(ctx, *imageName, types.ImagePullOptions{RegistryAuth: authstr})
 	failOnErr(pullErr, "couldn't pull container image.")
-	_, copyErr := io.Copy(os.Stdout, out)
+	_, copyErr := io.Copy(os.Stdout, out) // this is a weird thing about the Go Docker API.
 	failOnErr(copyErr, "couldn't pull container image.")
 
 	// finally, if nothing has failed, start the webserver, and listen on the /webhook path.
 	log.Println("server started")
 	http.HandleFunc("/webhook", handleWebhook)
+	//TODO: http.HandleFunc("/health", handleHealth)
+	//TODO: http.HandleFunc("/status", handleStatus)
+	//TODO: TLS instead of clear text.
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 

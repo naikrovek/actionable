@@ -1,4 +1,4 @@
 actionable.exe
 actionable
 .vscode/
-.vscode/*
+.vscode/launch.json
